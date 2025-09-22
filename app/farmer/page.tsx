@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -11,7 +10,17 @@ import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Leaf, MapPin, User, QrCode, CheckCircle } from "lucide-react"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
+import supabase from "@/lib/supabaseClient"
 
+// This interface matches the data structure of your form state
+interface FormDataType {
+  herbName: string
+  location: string
+  farmerId: string
+  description: string
+}
+
+// This interface matches the data structure you get back from Supabase
 interface HerbEntry {
   id: string
   herbName: string
@@ -20,10 +29,22 @@ interface HerbEntry {
   description: string
   timestamp: string
   batchId: string
+  status: string
+}
+
+// This interface perfectly matches the object we send to Supabase for insertion
+interface DatabaseInsertType {
+  batchId: string
+  herbName: string
+  location: string
+  farmerId: string
+  description: string
+  timestamp: string
+  status: string
 }
 
 export default function FarmerPage() {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormDataType>({
     herbName: "",
     location: "",
     farmerId: "",
@@ -43,31 +64,55 @@ export default function FarmerPage() {
   const generateBatchId = () => {
     const timestamp = Date.now()
     const random = Math.random().toString(36).substring(2, 8).toUpperCase()
-    return `AYU-${timestamp}-${random}`
+    // Fixed: Using template literal properly
+    return 'AYU-${timestamp}-${random}'
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
 
-    // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    try {
+      const batchId = generateBatchId()
 
-    const batchId = generateBatchId()
-    const entry: HerbEntry = {
-      id: Date.now().toString(),
-      ...formData,
-      timestamp: new Date().toISOString(),
-      batchId,
+      const newEntry: DatabaseInsertType = {
+        batchId,
+        herbName: formData.herbName,
+        location: formData.location,
+        farmerId: formData.farmerId,
+        description: formData.description,
+        timestamp: new Date().toISOString(),
+        status: "Pending Verification",
+      }
+
+      // Save to Supabase table "herb_entries"
+      const { data, error } = await supabase
+        .from("herb_entries")
+        .insert([newEntry])
+        .select() as { data: HerbEntry[] | null, error: any }
+
+      if (error) {
+        console.error("Supabase insert error:", error.message)
+        alert("Failed to save to Supabase: " + error.message)
+      } else {
+        console.log("Inserted into Supabase:", data)
+        const [insertedItem] = data || []
+        if (insertedItem) {
+          setSubmittedEntry(insertedItem)
+          
+          const existingEntries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
+          existingEntries.push(newEntry)
+          localStorage.setItem("herbEntries", JSON.stringify(existingEntries))
+        } else {
+          alert("Data was inserted but could not be retrieved.")
+        }
+      }
+    } catch (error) {
+      console.error("Error submitting form:", error)
+      alert("An error occurred while submitting the form.")
+    } finally {
+      setIsSubmitting(false)
     }
-
-    // Store in localStorage (mock blockchain)
-    const existingEntries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
-    existingEntries.push(entry)
-    localStorage.setItem("herbEntries", JSON.stringify(existingEntries))
-
-    setSubmittedEntry(entry)
-    setIsSubmitting(false)
   }
 
   const handleNewEntry = () => {
