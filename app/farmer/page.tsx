@@ -12,35 +12,35 @@ import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import supabase from "@/lib/supabaseClient"
 
-// This interface matches the data structure of your form state
+// This interface matches the form state
 interface FormDataType {
   herbName: string
   location: string
   farmerId: string
+  harvestDate: string
   description: string
 }
 
-// This interface matches the data structure you get back from Supabase
+// This interface matches what we get back from Supabase
 interface HerbEntry {
   id: string
-  herbName: string
-  location: string
-  farmerId: string
-  description: string
-  timestamp: string
-  batchId: string
+  farmer_id: string
+  herb_name: string
+  geo_tag: { location: string }
+  harvest_date: string | null
   status: string
+  description?: string
+  created_at: string
 }
 
-// This interface perfectly matches the object we send to Supabase for insertion
+// This interface matches what we send to Supabase
 interface DatabaseInsertType {
-  batchId: string
-  herbName: string
-  location: string
-  farmerId: string
-  description: string
-  timestamp: string
+  farmer_id: string
+  herb_name: string
+  geo_tag: { location: string }
+  harvest_date: string | null
   status: string
+  description?: string
 }
 
 export default function FarmerPage() {
@@ -48,6 +48,7 @@ export default function FarmerPage() {
     herbName: "",
     location: "",
     farmerId: "",
+    harvestDate: "",
     description: "",
   })
   const [submittedEntry, setSubmittedEntry] = useState<HerbEntry | null>(null)
@@ -61,35 +62,32 @@ export default function FarmerPage() {
     }))
   }
 
-  const generateBatchId = () => {
+  const generateBatchId = (herbEntry: HerbEntry) => {
     const timestamp = Date.now()
     const random = Math.random().toString(36).substring(2, 8).toUpperCase()
     // Fixed: Using template literal properly
-    return 'AYU-${timestamp}-${random}'
+    return `AYU-${timestamp}-${random}`
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSubmitting(true)
+    e.preventDefault();
+    setIsSubmitting(true);
 
     try {
-      const batchId = generateBatchId()
-
-      const newEntry: DatabaseInsertType = {
-        batchId,
-        herbName: formData.herbName,
-        location: formData.location,
-        farmerId: formData.farmerId,
-        description: formData.description,
-        timestamp: new Date().toISOString(),
+      const newHerb: DatabaseInsertType = {
+        farmer_id: formData.farmerId,
+        herb_name: formData.herbName,
+        geo_tag: { location: formData.location },
+        harvest_date: formData.harvestDate || null,
         status: "Pending Verification",
-      }
+        description: formData.description || undefined,
+      };
 
-      // Save to Supabase table "herb_entries"
+      // Save to Supabase table "Herbs"
       const { data, error } = await supabase
-        .from("herb_entries")
-        .insert([newEntry])
-        .select() as { data: HerbEntry[] | null, error: any }
+        .from("Herbs")
+        .insert([newHerb])
+        .select("*")
 
       if (error) {
         console.error("Supabase insert error:", error.message)
@@ -99,10 +97,6 @@ export default function FarmerPage() {
         const [insertedItem] = data || []
         if (insertedItem) {
           setSubmittedEntry(insertedItem)
-          
-          const existingEntries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
-          existingEntries.push(newEntry)
-          localStorage.setItem("herbEntries", JSON.stringify(existingEntries))
         } else {
           alert("Data was inserted but could not be retrieved.")
         }
@@ -121,11 +115,14 @@ export default function FarmerPage() {
       herbName: "",
       location: "",
       farmerId: "",
+      harvestDate: "",
       description: "",
     })
   }
 
   if (submittedEntry) {
+    const batchId = generateBatchId(submittedEntry)
+    
     return (
       <div className="min-h-screen bg-gradient-to-br from-background to-muted">
         <header className="border-b bg-card/50 backdrop-blur-sm">
@@ -160,19 +157,23 @@ export default function FarmerPage() {
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <Label className="text-muted-foreground">Herb Name</Label>
-                    <p className="font-medium">{submittedEntry.herbName}</p>
+                    <p className="font-medium">{submittedEntry.herb_name}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Farmer ID</Label>
-                    <p className="font-medium">{submittedEntry.farmerId}</p>
+                    <p className="font-medium">{submittedEntry.farmer_id}</p>
                   </div>
                   <div className="col-span-2">
                     <Label className="text-muted-foreground">Location</Label>
-                    <p className="font-medium">{submittedEntry.location}</p>
+                    <p className="font-medium">{submittedEntry.geo_tag.location}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-muted-foreground">Harvest Date</Label>
+                    <p className="font-medium">{submittedEntry.harvest_date || 'Not specified'}</p>
                   </div>
                   <div className="col-span-2">
                     <Label className="text-muted-foreground">Batch ID</Label>
-                    <p className="font-mono text-lg font-bold text-primary">{submittedEntry.batchId}</p>
+                    <p className="font-mono text-lg font-bold text-primary">{batchId}</p>
                   </div>
                 </div>
 
@@ -181,10 +182,11 @@ export default function FarmerPage() {
                   <div className="inline-block p-4 bg-white rounded-lg shadow-sm">
                     <QRCodeSVG
                       value={JSON.stringify({
-                        batchId: submittedEntry.batchId,
-                        herbName: submittedEntry.herbName,
-                        farmerId: submittedEntry.farmerId,
-                        timestamp: submittedEntry.timestamp,
+                        batchId: batchId,
+                        herbName: submittedEntry.herb_name,
+                        farmerId: submittedEntry.farmer_id,
+                        timestamp: submittedEntry.created_at,
+                        id: submittedEntry.id,
                       })}
                       size={200}
                       level="M"
@@ -265,9 +267,25 @@ export default function FarmerPage() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="farmerId">Farmer ID (UUID) *</Label>
+                  <Input
+                    id="farmerId"
+                    name="farmerId"
+                    placeholder="e.g., 123e4567-e89b-12d3-a456-426614174000"
+                    value={formData.farmerId}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Enter your registered farmer UUID from the system
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="location" className="flex items-center gap-2">
                     <MapPin className="h-4 w-4" />
-                    Farm Location (GPS Coordinates) *
+                    Farm Location *
                   </Label>
                   <Input
                     id="location"
@@ -284,14 +302,13 @@ export default function FarmerPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="farmerId">Farmer ID *</Label>
+                  <Label htmlFor="harvestDate">Harvest Date</Label>
                   <Input
-                    id="farmerId"
-                    name="farmerId"
-                    placeholder="e.g., FARM001, Your Registration Number"
-                    value={formData.farmerId}
+                    id="harvestDate"
+                    name="harvestDate"
+                    type="date"
+                    value={formData.harvestDate}
                     onChange={handleInputChange}
-                    required
                     className="w-full"
                   />
                 </div>
@@ -301,7 +318,7 @@ export default function FarmerPage() {
                   <Textarea
                     id="description"
                     name="description"
-                    placeholder="Organic certification, harvest date, growing conditions, etc."
+                    placeholder="Organic certification, growing conditions, etc."
                     value={formData.description}
                     onChange={handleInputChange}
                     rows={3}
