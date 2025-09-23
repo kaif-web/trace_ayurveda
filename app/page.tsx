@@ -20,22 +20,22 @@ interface HerbData {
 }
 
 export default function HomePage() {
-  const [herbs, setHerbs] = useState<HerbData[]>([])
+  const [herbs, setherbs] = useState<HerbData[]>([])
   const [loading, setLoading] = useState(true)
 
   // Initial fetch
   useEffect(() => {
-    const fetchHerbs = async () => {
+    const fetchherbs = async () => {
       setLoading(true)
-      const { data, error } = await supabase.from('Herbs').select('*').order('created_at', { ascending: false })
+      const { data, error } = await supabase.from('herbs').select('*').order('created_at', { ascending: false })
       if (error) {
         console.error('Error fetching herbs:', error.message)
       } else {
-        setHerbs(data || [])
+        setherbs(data || [])
       }
       setLoading(false)
     }
-    fetchHerbs()
+    fetchherbs()
   }, [])
 
   // Realtime subscription
@@ -44,16 +44,16 @@ export default function HomePage() {
       .channel('realtime:herb-changes')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'Herbs' },
+        { event: 'INSERT', schema: 'public', table: 'herbs' },
         (payload) => {
-          setHerbs((prev) => [payload.new as HerbData, ...prev])
+          setherbs((prev) => [payload.new as HerbData, ...prev])
         }
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'Herbs' },
+        { event: 'UPDATE', schema: 'public', table: 'herbs' },
         (payload) => {
-          setHerbs((prev) => prev.map(herb => 
+          setherbs((prev) => prev.map(herb => 
             herb.id === payload.new.id ? payload.new as HerbData : herb
           ))
         }
@@ -90,7 +90,7 @@ export default function HomePage() {
             </div>
             <nav className="hidden md:flex items-center gap-6">
               <Link href="#herbs" className="text-muted-foreground hover:text-foreground transition-colors">
-                Herbs Database
+                herbs Database
               </Link>
               <Link href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
                 Features
