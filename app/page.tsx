@@ -1,9 +1,83 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Leaf, Shield, Users, QrCode, MapPin, FlaskConical } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Leaf, Shield, Users, QrCode, MapPin, FlaskConical, Calendar, User } from "lucide-react"
 import Link from "next/link"
+import supabase from '@/lib/supabaseClient'
+
+interface HerbData {
+  id: string
+  farmer_id: number
+  herb_name: string
+  geo_tag: { location: string }
+  harvest_date: string | null
+  status: string
+  description?: string
+  created_at: string
+}
 
 export default function HomePage() {
+  const [herbs, setHerbs] = useState<HerbData[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // Initial fetch
+  useEffect(() => {
+    const fetchHerbs = async () => {
+      setLoading(true)
+      const { data, error } = await supabase.from('Herbs').select('*').order('created_at', { ascending: false })
+      if (error) {
+        console.error('Error fetching herbs:', error.message)
+      } else {
+        setHerbs(data || [])
+      }
+      setLoading(false)
+    }
+    fetchHerbs()
+  }, [])
+
+  // Realtime subscription
+  useEffect(() => {
+    const channel = supabase
+      .channel('realtime:herb-changes')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'Herbs' },
+        (payload) => {
+          setHerbs((prev) => [payload.new as HerbData, ...prev])
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'Herbs' },
+        (payload) => {
+          setHerbs((prev) => prev.map(herb => 
+            herb.id === payload.new.id ? payload.new as HerbData : herb
+          ))
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'verified':
+        return 'bg-green-100 text-green-800 hover:bg-green-200'
+      case 'pending verification':
+        return 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+      case 'rejected':
+        return 'bg-red-100 text-red-800 hover:bg-red-200'
+      default:
+        return 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
       {/* Header */}
@@ -15,6 +89,9 @@ export default function HomePage() {
               <h1 className="text-2xl font-bold text-foreground">AyurTrace</h1>
             </div>
             <nav className="hidden md:flex items-center gap-6">
+              <Link href="#herbs" className="text-muted-foreground hover:text-foreground transition-colors">
+                Herbs Database
+              </Link>
               <Link href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
                 Features
               </Link>
@@ -95,8 +172,85 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Herbs Database Section */}
+      <section id="herbs" className="py-20 px-4 bg-card/30">
+        <div className="container mx-auto">
+          <div className="text-center mb-16">
+            <h3 className="text-3xl font-bold text-foreground mb-4">Live Herbs Database</h3>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+              Real-time view of all registered herbs in our blockchain system with their verification status.
+            </p>
+          </div>
+
+          {loading ? (
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+              <p className="mt-4 text-muted-foreground">Loading herbs data...</p>
+            </div>
+          ) : herbs.length === 0 ? (
+            <div className="text-center">
+              <Leaf className="h-16 w-16 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <p className="text-muted-foreground">No herbs registered yet. Be the first farmer to add your herbs!</p>
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {herbs.map((herb) => (
+                <Card key={herb.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <Leaf className="h-5 w-5 text-primary" />
+                          {herb.herb_name}
+                        </CardTitle>
+                        <CardDescription className="flex items-center gap-1 mt-1">
+                          <User className="h-3 w-3" />
+                          Farmer ID: {herb.farmer_id}
+                        </CardDescription>
+                      </div>
+                      <Badge className={getStatusColor(herb.status)}>
+                        {herb.status}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <span className="text-sm text-muted-foreground">
+                        {herb.geo_tag.location}
+                      </span>
+                    </div>
+                    
+                    {herb.harvest_date && (
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          Harvested: {new Date(herb.harvest_date).toLocaleDateString()}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {herb.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {herb.description}
+                      </p>
+                    )}
+                    
+                    <div className="pt-2 border-t">
+                      <p className="text-xs text-muted-foreground">
+                        Registered: {new Date(herb.created_at).toLocaleDateString()} at {new Date(herb.created_at).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Features Section */}
-      <section id="features" className="py-20 px-4 bg-card/30">
+      <section id="features" className="py-20 px-4">
         <div className="container mx-auto">
           <div className="text-center mb-16">
             <h3 className="text-3xl font-bold text-foreground mb-4">Why Choose AyurTrace?</h3>
@@ -140,7 +294,7 @@ export default function HomePage() {
       </section>
 
       {/* How It Works Section */}
-      <section id="how-it-works" className="py-20 px-4">
+      <section id="how-it-works" className="py-20 px-4 bg-card/30">
         <div className="container mx-auto">
           <div className="text-center mb-16">
             <h3 className="text-3xl font-bold text-foreground mb-4">How It Works</h3>
