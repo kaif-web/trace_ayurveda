@@ -24,16 +24,16 @@ interface HerbEntry {
 }
 
 export default function HomePage() {
-  const [activeView, setActiveView] = useState<'home' | 'lab'>('home')
+  const [activeView, setActiveView] = useState<"home" | "lab">("home")
   const [herbs, setHerbs] = useState<HerbEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
-  const [labNotes, setLabNotes] = useState("")
-  const [labId, setLabId] = useState("")
+  const [labNotes, setLabNotes] = useState<{ [key: string]: string }>({})
+  const [labIds, setLabIds] = useState<{ [key: string]: string }>({})
 
   // fetch herbs when lab view is active
   useEffect(() => {
-    if (activeView === 'lab') {
+    if (activeView === "lab") {
       fetchHerbs()
     }
   }, [activeView])
@@ -50,12 +50,17 @@ export default function HomePage() {
   }
 
   const updateStatus = async (id: string, status: string) => {
-    const { error } = await supabase.from("Herbs").update({
-      status,
-      lab_notes: labNotes,
-      lab_id: labId,
-      verification_date: new Date().toISOString(),
-    }).eq("id", id)
+    const notes = labNotes[id] || ""
+    const lid = labIds[id] || ""
+    const { error } = await supabase
+      .from("Herbs")
+      .update({
+        status,
+        lab_notes: notes,
+        lab_id: lid,
+        verification_date: new Date().toISOString(),
+      })
+      .eq("id", id)
 
     if (error) {
       console.error("Error updating status:", error)
@@ -63,13 +68,11 @@ export default function HomePage() {
     } else {
       setHerbs((prev) =>
         prev.map((h) =>
-          h.id === id
-            ? { ...h, status, lab_notes: labNotes, lab_id: labId, verification_date: new Date().toISOString() }
-            : h
+          h.id === id ? { ...h, status, lab_notes: notes, lab_id: lid, verification_date: new Date().toISOString() } : h
         )
       )
-      setLabNotes("")
-      setLabId("")
+      setLabNotes((prev) => ({ ...prev, [id]: "" }))
+      setLabIds((prev) => ({ ...prev, [id]: "" }))
     }
   }
 
@@ -87,11 +90,7 @@ export default function HomePage() {
       <header className="flex items-center gap-2 mb-8">
         <Leaf className="h-6 w-6 text-primary" />
         <h1 className="text-2xl font-semibold">Lab Verification Portal</h1>
-        <Button 
-          onClick={() => setActiveView('home')} 
-          variant="outline" 
-          className="ml-auto"
-        >
+        <Button onClick={() => setActiveView("home")} variant="outline" className="ml-auto">
           Back to Home
         </Button>
       </header>
@@ -122,28 +121,48 @@ export default function HomePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <p><b>Farmer ID:</b> {herb.farmer_id}</p>
-                <p><b>Location:</b> {herb.geo_tag.location}</p>
-                <p><b>Harvest Date:</b> {herb.harvest_date || "Not provided"}</p>
-                <p><b>Description:</b> {herb.description || "—"}</p>
-                <p><b>Status:</b> {herb.status}</p>
-                {herb.lab_notes && <p><b>Lab Notes:</b> {herb.lab_notes}</p>}
-                {herb.lab_id && <p><b>Lab ID:</b> {herb.lab_id}</p>}
+                <p>
+                  <b>Farmer ID:</b> {herb.farmer_id}
+                </p>
+                <p>
+                  <b>Location:</b> {herb.geo_tag.location}
+                </p>
+                <p>
+                  <b>Harvest Date:</b> {herb.harvest_date || "Not provided"}
+                </p>
+                <p>
+                  <b>Description:</b> {herb.description || "—"}
+                </p>
+                <p>
+                  <b>Status:</b> {herb.status}
+                </p>
+                {herb.lab_notes && (
+                  <p>
+                    <b>Lab Notes:</b> {herb.lab_notes}
+                  </p>
+                )}
+                {herb.lab_id && (
+                  <p>
+                    <b>Lab ID:</b> {herb.lab_id}
+                  </p>
+                )}
                 {herb.verification_date && (
-                  <p><b>Verified On:</b> {new Date(herb.verification_date).toLocaleDateString()}</p>
+                  <p>
+                    <b>Verified On:</b> {new Date(herb.verification_date).toLocaleDateString()}
+                  </p>
                 )}
 
                 {/* Lab input fields */}
                 <div className="mt-4 space-y-2">
                   <Input
                     placeholder="Enter Lab ID"
-                    value={labId}
-                    onChange={(e) => setLabId(e.target.value)}
+                    value={labIds[herb.id] || ""}
+                    onChange={(e) => setLabIds((prev) => ({ ...prev, [herb.id]: e.target.value }))}
                   />
                   <Textarea
                     placeholder="Enter Lab Notes"
-                    value={labNotes}
-                    onChange={(e) => setLabNotes(e.target.value)}
+                    value={labNotes[herb.id] || ""}
+                    onChange={(e) => setLabNotes((prev) => ({ ...prev, [herb.id]: e.target.value }))}
                   />
                 </div>
 
@@ -174,13 +193,88 @@ export default function HomePage() {
     </div>
   )
 
-  // ✅ Home View unchanged
+  // ✅ Homepage view unchanged
   const HomeView = () => (
-    // ... keep your full HomeView code same as before ...
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* (your entire home UI unchanged) */}
+      <header className="p-6 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Leaf className="h-6 w-6 text-primary" />
+          <h1 className="text-xl font-bold">TraceAyurveda</h1>
+        </div>
+        <nav className="flex gap-4">
+          <Button variant="ghost" onClick={() => setActiveView("home")}>
+            Home
+          </Button>
+          <Button variant="ghost" onClick={() => setActiveView("lab")}>
+            Labs
+          </Button>
+          <Link href="/dashboard">
+            <Button variant="ghost">Farmer Dashboard</Button>
+          </Link>
+        </nav>
+      </header>
+
+      <main className="p-6 space-y-12">
+        <section className="text-center space-y-4">
+          <h2 className="text-3xl font-bold">Welcome to TraceAyurveda</h2>
+          <p className="text-muted-foreground max-w-2xl mx-auto">
+            Blockchain-powered traceability for authentic Ayurvedic herbs.
+          </p>
+        </section>
+
+        <section className="grid md:grid-cols-3 gap-6">
+          <Card>
+            <CardHeader>
+              <Shield className="h-6 w-6 text-primary" />
+              <CardTitle>Transparency</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Immutable blockchain records ensure product authenticity.</CardDescription>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <Users className="h-6 w-6 text-primary" />
+              <CardTitle>Farmer Empowerment</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Direct market access for local farmers.</CardDescription>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <FlaskConical className="h-6 w-6 text-primary" />
+              <CardTitle>Lab Verification</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Quality assurance by certified labs.</CardDescription>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section className="grid md:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <QrCode className="h-6 w-6 text-primary" />
+              <CardTitle>QR Traceability</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Scan QR to trace the herb’s journey from farm to table.</CardDescription>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <MapPin className="h-6 w-6 text-primary" />
+              <CardTitle>Geo-tagging</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CardDescription>Farm locations are geo-tagged for full transparency.</CardDescription>
+            </CardContent>
+          </Card>
+        </section>
+      </main>
     </div>
   )
 
-  return activeView === 'home' ? <HomeView /> : <LabView />
+  return activeView === "home" ? <HomeView /> : <LabView />
 }
