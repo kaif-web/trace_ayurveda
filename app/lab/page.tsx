@@ -20,13 +20,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, FlaskConical, CheckCircle, XCircle, Clock, Search, Eye } from "lucide-react"
 import Link from "next/link"
-import { createClient } from "@supabase/supabase-js"
-
-// ✅ Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import supabase from "@/lib/supabaseClient"  // import your supabase client
 
 interface HerbEntry {
   id: string
@@ -36,7 +30,7 @@ interface HerbEntry {
   description?: string
   created_at: string
   harvest_date?: string | null
-  status: "Pending Verification" | "Verified" | "Rejected"
+  status: string
   lab_notes?: string
   lab_id?: string
   verification_date?: string
@@ -50,15 +44,25 @@ export default function LabPage() {
   const [labId, setLabId] = useState("")
   const [statusChoice, setStatusChoice] = useState<"Verified" | "Rejected">("Verified")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     fetchEntries()
   }, [])
 
   async function fetchEntries() {
+    setLoading(true)
     const { data, error } = await supabase.from("Herbs").select("*").order("created_at", { ascending: false })
-    if (error) console.error("Error fetching herbs:", error)
-    else setHerbEntries(data as HerbEntry[])
+    if (error) {
+      console.error("Error fetching herbs:", error)
+    } else {
+      const normalized = (data || []).map((d: any) => ({
+        ...d,
+        status: d.status || "Pending Verification",
+      }))
+      setHerbEntries(normalized)
+    }
+    setLoading(false)
   }
 
   async function handleVerification(entry: HerbEntry) {
@@ -73,9 +77,11 @@ export default function LabPage() {
       })
       .eq("id", entry.id)
 
-    if (error) console.error("Error updating herb:", error)
-    else {
-      fetchEntries()
+    if (error) {
+      console.error("Error updating herb:", error)
+      alert("Failed to update: " + error.message)
+    } else {
+      await fetchEntries()
       setSelectedEntry(null)
       setLabNotes("")
       setLabId("")
@@ -84,15 +90,19 @@ export default function LabPage() {
     setIsSubmitting(false)
   }
 
-  const filteredEntries = herbEntries.filter(
-    (entry) =>
-      entry.herb_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.farmer_id.toLowerCase().includes(searchTerm.toLowerCase())
-  )
+  const filteredEntries = herbEntries.filter((entry) => {
+    const q = searchTerm.trim().toLowerCase()
+    if (!q) return true
+    return (
+      (entry.herb_name || "").toLowerCase().includes(q) ||
+      (entry.farmer_id || "").toLowerCase().includes(q) ||
+      (entry.description || "").toLowerCase().includes(q)
+    )
+  })
 
-  const pendingEntries = filteredEntries.filter((entry) => entry.status === "Pending Verification")
-  const verifiedEntries = filteredEntries.filter((entry) => entry.status === "Verified")
-  const rejectedEntries = filteredEntries.filter((entry) => entry.status === "Rejected")
+  const pendingEntries = filteredEntries.filter((e) => e.status === "Pending Verification")
+  const verifiedEntries = filteredEntries.filter((e) => e.status === "Verified")
+  const rejectedEntries = filteredEntries.filter((e) => e.status === "Rejected")
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -113,8 +123,7 @@ export default function LabPage() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-              <ArrowLeft className="h-5 w-5" />
-              Back to Home
+              <ArrowLeft className="h-5 w-5" /> Back to Home
             </Link>
             <div className="flex items-center gap-2">
               <FlaskConical className="h-6 w-6 text-secondary" />
@@ -132,14 +141,14 @@ export default function LabPage() {
           </p>
         </div>
 
-        {/* Search and Stats */}
+        {/* Search and stats */}
         <div className="grid md:grid-cols-4 gap-6 mb-8">
           <Card className="md:col-span-2">
             <CardContent className="pt-6">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by herb name or farmer ID..."
+                  placeholder="Search by herb name, batch ID, or farmer ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -166,11 +175,13 @@ export default function LabPage() {
         {/* Pending Entries Table */}
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-yellow-600"/> Pending Verification ({pendingEntries.length})</CardTitle>
-            <CardDescription>Herb entries awaiting lab verification and quality assessment</CardDescription>
+            <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-yellow-600" /> Pending Verification ({pendingEntries.length})</CardTitle>
+            <CardDescription>Herb entries awaiting lab verification</CardDescription>
           </CardHeader>
           <CardContent>
-            {pendingEntries.length === 0 ? (
+            {loading ? (
+              <div className="text-center py-8 text-muted-foreground">Loading...</div>
+            ) : pendingEntries.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">No pending entries found.</div>
             ) : (
               <Table>
@@ -191,35 +202,49 @@ export default function LabPage() {
                       <TableCell>
                         <Dialog>
                           <DialogTrigger asChild>
-                            <Button size="sm" onClick={() => setSelectedEntry(entry)}> <Eye className="h-4 w-4 mr-1"/> Verify </Button>
+                            <Button size="sm" onClick={() => setSelectedEntry(entry)}>
+                              <Eye className="h-4 w-4 mr-1" /> Verify
+                            </Button>
                           </DialogTrigger>
                           <DialogContent className="max-w-2xl">
                             <DialogHeader>
                               <DialogTitle>Verify Herb Entry</DialogTitle>
-                              <DialogDescription>Review details and provide verification decision</DialogDescription>
+                              <DialogDescription>Review and decide verification</DialogDescription>
                             </DialogHeader>
                             {selectedEntry && (
                               <div className="space-y-4">
                                 <p><strong>Herb:</strong> {selectedEntry.herb_name}</p>
                                 <p><strong>Farmer ID:</strong> {selectedEntry.farmer_id}</p>
                                 <p><strong>Submitted:</strong> {new Date(selectedEntry.created_at).toLocaleString()}</p>
+
                                 <Label>Lab ID *</Label>
-                                <Input value={labId} onChange={(e)=>setLabId(e.target.value)} required/>
+                                <Input value={labId} onChange={(e) => setLabId(e.target.value)} required />
+
                                 <Label>Status *</Label>
-                                <Select value={statusChoice} onValueChange={(v: "Verified"|"Rejected")=>setStatusChoice(v)}>
-                                  <SelectTrigger><SelectValue/></SelectTrigger>
+                                <Select value={statusChoice} onValueChange={(v: any) => setStatusChoice(v)}>
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="Verified"><CheckCircle className="h-4 w-4 text-green-600"/> Verified</SelectItem>
-                                    <SelectItem value="Rejected"><XCircle className="h-4 w-4 text-red-600"/> Rejected</SelectItem>
+                                    <SelectItem value="Verified">
+                                      <CheckCircle className="h-4 w-4 text-green-600" /> Verified
+                                    </SelectItem>
+                                    <SelectItem value="Rejected">
+                                      <XCircle className="h-4 w-4 text-red-600" /> Rejected
+                                    </SelectItem>
                                   </SelectContent>
                                 </Select>
+
                                 <Label>Lab Notes *</Label>
-                                <Textarea value={labNotes} onChange={(e)=>setLabNotes(e.target.value)} required/>
+                                <Textarea value={labNotes} onChange={(e) => setLabNotes(e.target.value)} required />
                               </div>
                             )}
                             <DialogFooter>
-                              <Button variant="outline" onClick={()=>setSelectedEntry(null)}>Cancel</Button>
-                              <Button onClick={()=>selectedEntry && handleVerification(selectedEntry)} disabled={isSubmitting || !labId || !labNotes}>
+                              <Button variant="outline" onClick={() => setSelectedEntry(null)}>Cancel</Button>
+                              <Button
+                                onClick={() => selectedEntry && handleVerification(selectedEntry)}
+                                disabled={isSubmitting || !labId || !labNotes}
+                              >
                                 {isSubmitting ? "Submitting..." : "Submit"}
                               </Button>
                             </DialogFooter>
@@ -237,13 +262,13 @@ export default function LabPage() {
         {/* Verified Entries */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><CheckCircle className="h-5 w-5 text-green-600"/> Verification History ({verifiedEntries.length+rejectedEntries.length})</CardTitle>
+            <CardTitle className="flex items-center gap-2"><CheckCircle className="h-5 w-5 text-green-600" /> Verification History ({verifiedEntries.length + rejectedEntries.length})</CardTitle>
             <CardDescription>Processed herb entries with verification results</CardDescription>
           </CardHeader>
           <CardContent>
-            {(verifiedEntries.length+rejectedEntries.length)===0 ? (
+            {verifiedEntries.length + rejectedEntries.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">No history available.</div>
-            ):(
+            ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -255,13 +280,13 @@ export default function LabPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...verifiedEntries,...rejectedEntries].map((entry)=>(
+                  {[...verifiedEntries, ...rejectedEntries].map((entry) => (
                     <TableRow key={entry.id}>
                       <TableCell>{entry.herb_name}</TableCell>
                       <TableCell>{entry.farmer_id}</TableCell>
                       <TableCell>{getStatusBadge(entry.status)}</TableCell>
-                      <TableCell>{entry.lab_id||"-"}</TableCell>
-                      <TableCell>{entry.verification_date? new Date(entry.verification_date).toLocaleDateString() : "-"}</TableCell>
+                      <TableCell>{entry.lab_id || "-"}</TableCell>
+                      <TableCell>{entry.verification_date ? new Date(entry.verification_date).toLocaleDateString() : "-"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
