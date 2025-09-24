@@ -1,280 +1,479 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Leaf, Shield, Users, QrCode, MapPin, FlaskConical, CheckCircle, XCircle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ArrowLeft, FlaskConical, CheckCircle, XCircle, Clock, Search, Eye } from "lucide-react"
 import Link from "next/link"
 import supabase from "@/lib/supabaseClient"
 
 interface HerbEntry {
   id: string
-  farmer_id: string
   herb_name: string
-  geo_tag: { location: string }
-  harvest_date: string | null
-  status: string
+  location: string  // Assuming geo_tag.location or direct location field
+  farmer_id: string
   description?: string
-  created_at: string
+  created_at: string  // Using created_at as timestamp
+  batch_id: string  // Assuming batch_id field exists
+  status: "pending" | "verified" | "rejected"
   lab_notes?: string
-  lab_id?: string
   verification_date?: string
+  lab_id?: string
 }
 
-export default function HomePage() {
-  const [activeView, setActiveView] = useState<"home" | "lab">("home")
-  const [herbs, setHerbs] = useState<HerbEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [search, setSearch] = useState("")
-  const [labNotes, setLabNotes] = useState<{ [key: string]: string }>({})
-  const [labIds, setLabIds] = useState<{ [key: string]: string }>({})
+interface VerificationForm {
+  status: "verified" | "rejected"
+  labNotes: string
+  labId: string
+}
 
-  // fetch herbs when lab view is active
+export default function LabPage() {
+  const [herbEntries, setHerbEntries] = useState<HerbEntry[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedEntry, setSelectedEntry] = useState<HerbEntry | null>(null)
+  const [verificationForm, setVerificationForm] = useState<VerificationForm>({
+    status: "verified",
+    labNotes: "",
+    labId: "",
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loading, setLoading] = useState(false)
+
   useEffect(() => {
-    if (activeView === "lab") {
-      fetchHerbs()
-    }
-  }, [activeView])
+    fetchHerbs()
+  }, [])
 
   const fetchHerbs = async () => {
     setLoading(true)
-    const { data, error } = await supabase.from("Herbs").select("*").order("created_at", { ascending: false })
+    const { data, error } = await supabase
+      .from("Herbs")
+      .select("*")
+      .order("created_at", { ascending: false })
+    
     if (error) {
       console.error("Error fetching herbs:", error)
     } else {
-      setHerbs(data as HerbEntry[])
+      // Map data to interface, ensuring status defaults to "pending" if missing
+      setHerbEntries(
+        (data as HerbEntry[]).map((entry) => ({
+          ...entry,
+          status: entry.status || "pending",
+          // Adjust field mappings if needed (e.g., if location is geo_tag.location)
+          location: entry.location || (entry as any).geo_tag?.location || "",
+          herb_name: entry.herb_name,
+          farmer_id: entry.farmer_id,
+          batch_id: entry.batch_id || `BATCH-${entry.id}`,  // Fallback if batch_id missing
+          created_at: entry.created_at || new Date().toISOString(),
+        }))
+      )
     }
     setLoading(false)
   }
 
-  const updateStatus = async (id: string, status: string) => {
-    const notes = labNotes[id] || ""
-    const lid = labIds[id] || ""
+  const filteredEntries = herbEntries.filter(
+    (entry) =>
+      entry.herb_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entry.batch_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entry.farmer_id.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
+
+  const pendingEntries = filteredEntries.filter((entry) => entry.status === "pending")
+  const verifiedEntries = filteredEntries.filter((entry) => entry.status === "verified")
+  const rejectedEntries = filteredEntries.filter((entry) => entry.status === "rejected")
+
+  const handleVerification = async (entry: HerbEntry) => {
+    setIsSubmitting(true)
+
+    // Simulate API call delay
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    const updatedEntry: HerbEntry = {
+      ...entry,
+      status: verificationForm.status,
+      lab_notes: verificationForm.labNotes,
+      lab_id: verificationForm.labId,
+      verification_date: new Date().toISOString(),
+    }
+
+    // Update Supabase
     const { error } = await supabase
       .from("Herbs")
       .update({
-        status,
-        lab_notes: notes,
-        lab_id: lid,
+        status: verificationForm.status,
+        lab_notes: verificationForm.labNotes,
+        lab_id: verificationForm.labId,
         verification_date: new Date().toISOString(),
       })
-      .eq("id", id)
+      .eq("id", entry.id)
 
     if (error) {
-      console.error("Error updating status:", error)
-      alert("Failed to update status: " + error.message)
-    } else {
-      setHerbs((prev) =>
-        prev.map((h) =>
-          h.id === id ? { ...h, status, lab_notes: notes, lab_id: lid, verification_date: new Date().toISOString() } : h
+      console.error("Error updating herb entry:", error)
+      // Optionally show error to user
+      alert("Failed to update verification: " + error.message)
+      setIsSubmitting(false)
+      return
+    }
+
+    // Update state
+    setHerbEntries((prev) =>
+      prev.map((e) => (e.id === entry.id ? updatedEntry : e))
+    )
+    setSelectedEntry(null)
+    setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+    setIsSubmitting(false)
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return (
+          <Badge variant="outline" className="text-yellow-600 border-yellow-600">
+            <Clock className="h-3 w-3" />
+            Pending
+          </Badge>
         )
-      )
-      setLabNotes((prev) => ({ ...prev, [id]: "" }))
-      setLabIds((prev) => ({ ...prev, [id]: "" }))
+      case "verified":
+        return (
+          <Badge variant="default" className="bg-green-600">
+            <CheckCircle className="h-3 w-3" />
+            Verified
+          </Badge>
+        )
+      case "rejected":
+        return (
+          <Badge variant="destructive">
+            <XCircle className="h-3 w-3" />
+            Rejected
+          </Badge>
+        )
+      default:
+        return <Badge variant="outline">Unknown</Badge>
     }
   }
 
-  // filter herbs by search input
-  const filteredHerbs = herbs.filter(
-    (h) =>
-      h.herb_name.toLowerCase().includes(search.toLowerCase()) ||
-      h.farmer_id.toLowerCase().includes(search.toLowerCase()) ||
-      (h.description?.toLowerCase().includes(search.toLowerCase()) ?? false)
-  )
-
-  // Lab View Component
-  const LabView = () => (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted p-6">
-      <header className="flex items-center gap-2 mb-8">
-        <Leaf className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-semibold">Lab Verification Portal</h1>
-        <Button onClick={() => setActiveView("home")} variant="outline" className="ml-auto">
-          Back to Home
-        </Button>
-      </header>
-
-      {/* Search bar */}
-      <div className="mb-6 max-w-md">
-        <Input
-          placeholder="Search by herb name, farmer ID, or description..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background to-muted flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading herb entries...</p>
+        </div>
       </div>
+    )
+  }
 
-      {loading ? (
-        <p>Loading herbs...</p>
-      ) : filteredHerbs.length === 0 ? (
-        <p>No herbs found.</p>
-      ) : (
-        <div className="grid gap-6">
-          {filteredHerbs.map((herb) => (
-            <Card key={herb.id} className="border-primary/20">
-              <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                  <span>{herb.herb_name}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {new Date(herb.created_at).toLocaleString()}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p>
-                  <b>Farmer ID:</b> {herb.farmer_id}
-                </p>
-                <p>
-                  <b>Location:</b> {herb.geo_tag.location}
-                </p>
-                <p>
-                  <b>Harvest Date:</b> {herb.harvest_date || "Not provided"}
-                </p>
-                <p>
-                  <b>Description:</b> {herb.description || "—"}
-                </p>
-                <p>
-                  <b>Status:</b> {herb.status}
-                </p>
-                {herb.lab_notes && (
-                  <p>
-                    <b>Lab Notes:</b> {herb.lab_notes}
-                  </p>
-                )}
-                {herb.lab_id && (
-                  <p>
-                    <b>Lab ID:</b> {herb.lab_id}
-                  </p>
-                )}
-                {herb.verification_date && (
-                  <p>
-                    <b>Verified On:</b> {new Date(herb.verification_date).toLocaleDateString()}
-                  </p>
-                )}
-
-                {/* Lab input fields */}
-                <div className="mt-4 space-y-2">
-                  <Input
-                    placeholder="Enter Lab ID"
-                    value={labIds[herb.id] || ""}
-                    onChange={(e) => setLabIds((prev) => ({ ...prev, [herb.id]: e.target.value }))}
-                  />
-                  <Textarea
-                    placeholder="Enter Lab Notes"
-                    value={labNotes[herb.id] || ""}
-                    onChange={(e) => setLabNotes((prev) => ({ ...prev, [herb.id]: e.target.value }))}
-                  />
-                </div>
-
-                <div className="flex gap-3 mt-4">
-                  <Button
-                    className="flex items-center gap-2"
-                    onClick={() => updateStatus(herb.id, "Verified")}
-                    disabled={herb.status === "Verified"}
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                    Approve
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="flex items-center gap-2"
-                    onClick={() => updateStatus(herb.id, "Rejected")}
-                    disabled={herb.status === "Rejected"}
-                  >
-                    <XCircle className="h-4 w-4" />
-                    Reject
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-
-  // ✅ Homepage view unchanged
-  const HomeView = () => (
+  return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      <header className="p-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Leaf className="h-6 w-6 text-primary" />
-          <h1 className="text-xl font-bold">TraceAyurveda</h1>
+      <header className="border-b bg-card/50 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+              Back to Home
+            </Link>
+            <div className="flex items-center gap-2">
+              <FlaskConical className="h-6 w-6 text-secondary" />
+              <h1 className="text-xl font-semibold">AyurTrace - Lab Verification Portal</h1>
+            </div>
+          </div>
         </div>
-        <nav className="flex gap-4">
-          <Button variant="ghost" onClick={() => setActiveView("home")}>
-            Home
-          </Button>
-          <Button variant="ghost" onClick={() => setActiveView("lab")}>
-            Labs
-          </Button>
-          <Link href="/dashboard">
-            <Button variant="ghost">Farmer Dashboard</Button>
-          </Link>
-        </nav>
       </header>
 
-      <main className="p-6 space-y-12">
-        <section className="text-center space-y-4">
-          <h2 className="text-3xl font-bold">Welcome to TraceAyurveda</h2>
-          <p className="text-muted-foreground max-w-2xl mx-auto">
-            Blockchain-powered traceability for authentic Ayurvedic herbs.
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h2 className="text-3xl font-bold text-foreground mb-4">Herb Verification Dashboard</h2>
+          <p className="text-lg text-muted-foreground">
+            Review and verify Ayurvedic herb entries from farmers to ensure quality and authenticity.
           </p>
-        </section>
+        </div>
 
-        <section className="grid md:grid-cols-3 gap-6">
-          <Card>
-            <CardHeader>
-              <Shield className="h-6 w-6 text-primary" />
-              <CardTitle>Transparency</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>Immutable blockchain records ensure product authenticity.</CardDescription>
+        {/* Search and Stats */}
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
+          <Card className="md:col-span-2">
+            <CardContent className="pt-6">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by herb name, batch ID, or farmer ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader>
-              <Users className="h-6 w-6 text-primary" />
-              <CardTitle>Farmer Empowerment</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>Direct market access for local farmers.</CardDescription>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <FlaskConical className="h-6 w-6 text-primary" />
-              <CardTitle>Lab Verification</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>Quality assurance by certified labs.</CardDescription>
-            </CardContent>
-          </Card>
-        </section>
 
-        <section className="grid md:grid-cols-2 gap-6">
           <Card>
-            <CardHeader>
-              <QrCode className="h-6 w-6 text-primary" />
-              <CardTitle>QR Traceability</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>Scan QR to trace the herb’s journey from farm to table.</CardDescription>
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-yellow-600">{pendingEntries.length}</div>
+                <div className="text-sm text-muted-foreground">Pending Review</div>
+              </div>
             </CardContent>
           </Card>
+
           <Card>
-            <CardHeader>
-              <MapPin className="h-6 w-6 text-primary" />
-              <CardTitle>Geo-tagging</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CardDescription>Farm locations are geo-tagged for full transparency.</CardDescription>
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">{verifiedEntries.length}</div>
+                <div className="text-sm text-muted-foreground">Verified</div>
+              </div>
             </CardContent>
           </Card>
-        </section>
-      </main>
+        </div>
+
+        {/* Pending Entries Table */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-yellow-600" />
+              Pending Verification ({pendingEntries.length})
+            </CardTitle>
+            <CardDescription>Herb entries awaiting lab verification and quality assessment</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {pendingEntries.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No pending entries found. All herbs have been processed.
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Batch ID</TableHead>
+                    <TableHead>Herb Name</TableHead>
+                    <TableHead>Farmer ID</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Submitted</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pendingEntries.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell className="font-mono text-sm">{entry.batch_id}</TableCell>
+                      <TableCell className="font-medium">{entry.herb_name}</TableCell>
+                      <TableCell>{entry.farmer_id}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{entry.location}</TableCell>
+                      <TableCell>{new Date(entry.created_at).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button size="sm" onClick={() => setSelectedEntry(entry)} className="mr-2">
+                              <Eye className="h-4 w-4 mr-1" />
+                              Verify
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                              <DialogTitle>Verify Herb Entry</DialogTitle>
+                              <DialogDescription>
+                                Review the herb details and provide your verification decision
+                              </DialogDescription>
+                            </DialogHeader>
+
+                            {selectedEntry && (
+                              <div className="space-y-6">
+                                {/* Herb Details */}
+                                <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Herb Name</Label>
+                                    <p className="font-medium">{selectedEntry.herb_name}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Batch ID</Label>
+                                    <p className="font-mono text-sm">{selectedEntry.batch_id}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Farmer ID</Label>
+                                    <p className="font-medium">{selectedEntry.farmer_id}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Submitted</Label>
+                                    <p>{new Date(selectedEntry.created_at).toLocaleString()}</p>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <Label className="text-sm text-muted-foreground">Location</Label>
+                                    <p>{selectedEntry.location}</p>
+                                  </div>
+                                  {selectedEntry.description && (
+                                    <div className="col-span-2">
+                                      <Label className="text-sm text-muted-foreground">Additional Details</Label>
+                                      <p className="text-sm">{selectedEntry.description}</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Verification Form */}
+                                <div className="space-y-4">
+                                  <div className="space-y-2">
+                                    <Label htmlFor="labId">Lab ID *</Label>
+                                    <Input
+                                      id="labId"
+                                      placeholder="e.g., LAB001, Your Lab Registration"
+                                      value={verificationForm.labId}
+                                      onChange={(e) =>
+                                        setVerificationForm((prev) => ({
+                                          ...prev,
+                                          labId: e.target.value,
+                                        }))
+                                      }
+                                      required
+                                    />
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <Label htmlFor="status">Verification Status *</Label>
+                                    <Select
+                                      value={verificationForm.status}
+                                      onValueChange={(value: "verified" | "rejected") =>
+                                        setVerificationForm((prev) => ({ ...prev, status: value }))
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="verified">
+                                          <div className="flex items-center gap-2">
+                                            <CheckCircle className="h-4 w-4 text-green-600" />
+                                            Verified - Quality Approved
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="rejected">
+                                          <div className="flex items-center gap-2">
+                                            <XCircle className="h-4 w-4 text-red-600" />
+                                            Rejected - Quality Issues
+                                          </div>
+                                        </SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <Label htmlFor="labNotes">Lab Notes & Test Results *</Label>
+                                    <Textarea
+                                      id="labNotes"
+                                      placeholder="Enter detailed test results, quality assessment, purity levels, contamination checks, etc."
+                                      value={verificationForm.labNotes}
+                                      onChange={(e) =>
+                                        setVerificationForm((prev) => ({
+                                          ...prev,
+                                          labNotes: e.target.value,
+                                        }))
+                                      }
+                                      rows={4}
+                                      required
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            <DialogFooter>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedEntry(null)
+                                  setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                onClick={() => selectedEntry && handleVerification(selectedEntry)}
+                                disabled={isSubmitting || !verificationForm.labId || !verificationForm.labNotes}
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground mr-2" />
+                                    Submitting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <FlaskConical className="h-4 w-4 mr-2" />
+                                    Submit Verification
+                                  </>
+                                )}
+                              </Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Verified Entries */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Verification History ({verifiedEntries.length + rejectedEntries.length})
+            </CardTitle>
+            <CardDescription>Previously processed herb entries with verification results</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {verifiedEntries.length + rejectedEntries.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No verification history available yet.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Batch ID</TableHead>
+                    <TableHead>Herb Name</TableHead>
+                    <TableHead>Farmer ID</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Lab ID</TableHead>
+                    <TableHead>Verified Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...verifiedEntries, ...rejectedEntries]
+                    .sort(
+                      (a, b) =>
+                        new Date(b.verification_date || b.created_at || 0).getTime() - new Date(a.verification_date || a.created_at || 0).getTime(),
+                    )
+                    .map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell className="font-mono text-sm">{entry.batch_id}</TableCell>
+                        <TableCell className="font-medium">{entry.herb_name}</TableCell>
+                        <TableCell>{entry.farmer_id}</TableCell>
+                        <TableCell>{getStatusBadge(entry.status)}</TableCell>
+                        <TableCell>{entry.lab_id}</TableCell>
+                        <TableCell>
+                          {entry.verification_date ? new Date(entry.verification_date).toLocaleDateString() : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
-
-  return activeView === "home" ? <HomeView /> : <LabView />
 }
