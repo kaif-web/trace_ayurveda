@@ -20,34 +20,24 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, FlaskConical, CheckCircle, XCircle, Clock, Search, Eye } from "lucide-react"
 import Link from "next/link"
-import { createClient } from "@supabase/supabase-js"
-
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Missing Supabase URL or anonymous key")
-}
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey)
+import supabase from "@/lib/supabaseClient"
 
 interface HerbEntry {
   id: string
-  herbName: string
-  location: string
-  farmerId: string
-  description: string
-  timestamp: string
-  batchId: string
-  status: "pending" | "verified" | "rejected"
-  labNotes?: string
-  verificationDate?: string
-  labId?: string
+  farmer_id: string
+  herb_name: string
+  geo_tag: { location: string }
+  harvest_date: string | null
+  status: string
+  description?: string
+  created_at: string
+  lab_notes?: string
+  verification_date?: string | null
+  lab_id?: string | null
 }
 
 interface VerificationForm {
-  status: "verified" | "rejected"
+  status: "Verified" | "Rejected"
   labNotes: string
   labId: string
 }
@@ -57,22 +47,25 @@ export default function LabPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedEntry, setSelectedEntry] = useState<HerbEntry | null>(null)
   const [verificationForm, setVerificationForm] = useState<VerificationForm>({
-    status: "verified",
+    status: "Verified",
     labNotes: "",
     labId: "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Function to fetch data from Supabase
+  // Function to fetch data from Supabase (Herbs table)
   const fetchHerbEntries = async () => {
     setIsLoading(true)
-    const { data, error } = await supabase.from("herb_entries").select("*")
+    const { data, error } = await supabase
+      .from("Herbs")
+      .select("id, farmer_id, herb_name, geo_tag, harvest_date, status, description, created_at, lab_notes, verification_date, lab_id")
+      .order("created_at", { ascending: false })
 
     if (error) {
       console.error("Error fetching data:", error)
     } else if (data) {
-      setHerbEntries(data as HerbEntry[])
+      setHerbEntries(data as unknown as HerbEntry[])
     }
     setIsLoading(false)
   }
@@ -81,28 +74,29 @@ export default function LabPage() {
     fetchHerbEntries()
   }, [])
 
-  const filteredEntries = herbEntries.filter(
-    (entry) =>
-      entry.herbName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.batchId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.farmerId.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const filteredEntries = herbEntries.filter((entry) => {
+    const nameMatch = entry.herb_name?.toLowerCase().includes(searchTerm.toLowerCase())
+    const farmerMatch = entry.farmer_id?.toLowerCase().includes(searchTerm.toLowerCase())
+    const descMatch = entry.description?.toLowerCase().includes(searchTerm.toLowerCase())
+    return Boolean(nameMatch || farmerMatch || descMatch)
+  })
 
-  const pendingEntries = filteredEntries.filter((entry) => entry.status === "pending")
-  const verifiedEntries = filteredEntries.filter((entry) => entry.status === "verified")
-  const rejectedEntries = filteredEntries.filter((entry) => entry.status === "rejected")
+  const normalizeStatus = (status: string) => status?.toLowerCase()
+  const pendingEntries = filteredEntries.filter((entry) => normalizeStatus(entry.status) === "pending")
+  const verifiedEntries = filteredEntries.filter((entry) => normalizeStatus(entry.status) === "verified")
+  const rejectedEntries = filteredEntries.filter((entry) => normalizeStatus(entry.status) === "rejected")
 
   const handleVerification = async (entry: HerbEntry) => {
     setIsSubmitting(true)
 
-    const updatedEntry: Partial<HerbEntry> = {
+    const updatedEntry = {
       status: verificationForm.status,
-      labNotes: verificationForm.labNotes,
-      labId: verificationForm.labId,
-      verificationDate: new Date().toISOString(),
+      lab_notes: verificationForm.labNotes,
+      lab_id: verificationForm.labId,
+      verification_date: new Date().toISOString(),
     }
 
-    const { error } = await supabase.from("herb_entries").update(updatedEntry).eq("id", entry.id)
+    const { error } = await supabase.from("Herbs").update(updatedEntry).eq("id", entry.id)
 
     if (error) {
       console.error("Error updating entry:", error)
@@ -112,12 +106,12 @@ export default function LabPage() {
     }
 
     setSelectedEntry(null)
-    setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+    setVerificationForm({ status: "Verified", labNotes: "", labId: "" })
     setIsSubmitting(false)
   }
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case "pending":
         return (
           <Badge variant="outline" className="text-yellow-600 border-yellow-600">
@@ -179,7 +173,7 @@ export default function LabPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search by herb name, batch ID, or farmer ID..."
+                  placeholder="Search by herb name, farmer ID, or description..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
@@ -232,7 +226,6 @@ export default function LabPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Batch ID</TableHead>
                         <TableHead>Herb Name</TableHead>
                         <TableHead>Farmer ID</TableHead>
                         <TableHead>Location</TableHead>
@@ -243,11 +236,10 @@ export default function LabPage() {
                     <TableBody>
                       {pendingEntries.map((entry) => (
                         <TableRow key={entry.id}>
-                          <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
-                          <TableCell className="font-medium">{entry.herbName}</TableCell>
-                          <TableCell>{entry.farmerId}</TableCell>
-                          <TableCell className="max-w-[200px] truncate">{entry.location}</TableCell>
-                          <TableCell>{new Date(entry.timestamp).toLocaleDateString()}</TableCell>
+                          <TableCell className="font-medium">{entry.herb_name}</TableCell>
+                          <TableCell>{entry.farmer_id}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{entry.geo_tag?.location}</TableCell>
+                          <TableCell>{new Date(entry.created_at).toLocaleDateString()}</TableCell>
                           <TableCell>
                             <Dialog>
                               <DialogTrigger asChild>
@@ -270,23 +262,19 @@ export default function LabPage() {
                                     <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
                                       <div>
                                         <Label className="text-sm text-muted-foreground">Herb Name</Label>
-                                        <p className="font-medium">{selectedEntry.herbName}</p>
-                                      </div>
-                                      <div>
-                                        <Label className="text-sm text-muted-foreground">Batch ID</Label>
-                                        <p className="font-mono text-sm">{selectedEntry.batchId}</p>
+                                        <p className="font-medium">{selectedEntry.herb_name}</p>
                                       </div>
                                       <div>
                                         <Label className="text-sm text-muted-foreground">Farmer ID</Label>
-                                        <p className="font-medium">{selectedEntry.farmerId}</p>
+                                        <p className="font-medium">{selectedEntry.farmer_id}</p>
                                       </div>
                                       <div>
                                         <Label className="text-sm text-muted-foreground">Submitted</Label>
-                                        <p>{new Date(selectedEntry.timestamp).toLocaleString()}</p>
+                                        <p>{new Date(selectedEntry.created_at).toLocaleString()}</p>
                                       </div>
                                       <div className="col-span-2">
                                         <Label className="text-sm text-muted-foreground">Location</Label>
-                                        <p>{selectedEntry.location}</p>
+                                        <p>{selectedEntry.geo_tag?.location}</p>
                                       </div>
                                       {selectedEntry.description && (
                                         <div className="col-span-2">
@@ -320,7 +308,7 @@ export default function LabPage() {
                                         <Label htmlFor="status">Verification Status *</Label>
                                         <Select
                                           value={verificationForm.status}
-                                          onValueChange={(value: "verified" | "rejected") =>
+                                          onValueChange={(value: "Verified" | "Rejected") =>
                                             setVerificationForm((prev) => ({ ...prev, status: value }))
                                           }
                                         >
@@ -328,13 +316,13 @@ export default function LabPage() {
                                             <SelectValue />
                                           </SelectTrigger>
                                           <SelectContent>
-                                            <SelectItem value="verified">
+                                            <SelectItem value="Verified">
                                               <div className="flex items-center gap-2">
                                                 <CheckCircle className="h-4 w-4 text-green-600" />
                                                 Verified - Quality Approved
                                               </div>
                                             </SelectItem>
-                                            <SelectItem value="rejected">
+                                            <SelectItem value="Rejected">
                                               <div className="flex items-center gap-2">
                                                 <XCircle className="h-4 w-4 text-red-600" />
                                                 Rejected - Quality Issues
@@ -369,7 +357,7 @@ export default function LabPage() {
                                     variant="outline"
                                     onClick={() => {
                                       setSelectedEntry(null)
-                                      setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+                                      setVerificationForm({ status: "Verified", labNotes: "", labId: "" })
                                     }}
                                   >
                                     Cancel
@@ -418,7 +406,6 @@ export default function LabPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Batch ID</TableHead>
                         <TableHead>Herb Name</TableHead>
                         <TableHead>Farmer ID</TableHead>
                         <TableHead>Status</TableHead>
@@ -430,17 +417,16 @@ export default function LabPage() {
                       {[...verifiedEntries, ...rejectedEntries]
                         .sort(
                           (a, b) =>
-                            new Date(b.verificationDate || 0).getTime() - new Date(a.verificationDate || 0).getTime(),
+                            new Date(b.verification_date || 0).getTime() - new Date(a.verification_date || 0).getTime(),
                         )
                         .map((entry) => (
                           <TableRow key={entry.id}>
-                            <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
-                            <TableCell className="font-medium">{entry.herbName}</TableCell>
-                            <TableCell>{entry.farmerId}</TableCell>
+                            <TableCell className="font-medium">{entry.herb_name}</TableCell>
+                            <TableCell>{entry.farmer_id}</TableCell>
                             <TableCell>{getStatusBadge(entry.status)}</TableCell>
-                            <TableCell>{entry.labId}</TableCell>
+                            <TableCell>{entry.lab_id}</TableCell>
                             <TableCell>
-                              {entry.verificationDate ? new Date(entry.verificationDate).toLocaleDateString() : "-"}
+                              {entry.verification_date ? new Date(entry.verification_date).toLocaleDateString() : "-"}
                             </TableCell>
                           </TableRow>
                         ))}

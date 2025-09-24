@@ -1,345 +1,430 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Leaf, Shield, Users, QrCode, MapPin, FlaskConical, CheckCircle, XCircle } from "lucide-react"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ArrowLeft, FlaskConical, CheckCircle, XCircle, Clock, Search, Eye } from "lucide-react"
 import Link from "next/link"
-import supabase from "@/lib/supabaseClient"
 
 interface HerbEntry {
   id: string
-  farmer_id: string
-  herb_name: string
-  geo_tag: { location: string }
-  harvest_date: string | null
-  status: string
-  description?: string
-  created_at: string
+  herbName: string
+  location: string
+  farmerId: string
+  description: string
+  timestamp: string
+  batchId: string
+  status: "pending" | "verified" | "rejected"
+  labNotes?: string
+  verificationDate?: string
+  labId?: string
 }
 
-export default function HomePage() {
-  const [activeView, setActiveView] = useState<'home' | 'lab'>('home')
-  const [herbs, setHerbs] = useState<HerbEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [search, setSearch] = useState("")
+interface VerificationForm {
+  status: "verified" | "rejected"
+  labNotes: string
+  labId: string
+}
 
-  // fetch herbs when lab view is active
+export default function LabPage() {
+  const [herbEntries, setHerbEntries] = useState<HerbEntry[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedEntry, setSelectedEntry] = useState<HerbEntry | null>(null)
+  const [verificationForm, setVerificationForm] = useState<VerificationForm>({
+    status: "verified",
+    labNotes: "",
+    labId: "",
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
   useEffect(() => {
-    if (activeView === 'lab') {
-      fetchHerbs()
-    }
-  }, [activeView])
+    // Load herb entries from localStorage
+    const entries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
+    setHerbEntries(
+      entries.map((entry: any) => ({
+        ...entry,
+        status: entry.status || "pending",
+      })),
+    )
+  }, [])
 
-  const fetchHerbs = async () => {
-    setLoading(true)
-    const { data, error } = await supabase.from("Herbs").select("*").order("created_at", { ascending: false })
-    if (error) {
-      console.error("Error fetching herbs:", error)
-    } else {
-      setHerbs(data as HerbEntry[])
-    }
-    setLoading(false)
-  }
-
-  const updateStatus = async (id: string, status: string) => {
-    const { error } = await supabase.from("Herbs").update({ status }).eq("id", id)
-    if (error) {
-      console.error("Error updating status:", error)
-      alert("Failed to update status: " + error.message)
-    } else {
-      setHerbs((prev) =>
-        prev.map((h) => (h.id === id ? { ...h, status } : h))
-      )
-    }
-  }
-
-  // filter herbs by search input
-  const filteredHerbs = herbs.filter(
-    (h) =>
-      h.herb_name.toLowerCase().includes(search.toLowerCase()) ||
-      h.farmer_id.toLowerCase().includes(search.toLowerCase()) ||
-      (h.description?.toLowerCase().includes(search.toLowerCase()) ?? false)
+  const filteredEntries = herbEntries.filter(
+    (entry) =>
+      entry.herbName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entry.batchId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      entry.farmerId.toLowerCase().includes(searchTerm.toLowerCase()),
   )
 
-  // Lab View Component
-  const LabView = () => (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted p-6">
-      <header className="flex items-center gap-2 mb-8">
-        <Leaf className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-semibold">Lab Verification Portal</h1>
-        <Button 
-          onClick={() => setActiveView('home')} 
-          variant="outline" 
-          className="ml-auto"
-        >
-          Back to Home
-        </Button>
-      </header>
+  const pendingEntries = filteredEntries.filter((entry) => entry.status === "pending")
+  const verifiedEntries = filteredEntries.filter((entry) => entry.status === "verified")
+  const rejectedEntries = filteredEntries.filter((entry) => entry.status === "rejected")
 
-      {/* Search bar */}
-      <div className="mb-6 max-w-md">
-        <Input
-          placeholder="Search by herb name, farmer ID, or description..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
+  const handleVerification = async (entry: HerbEntry) => {
+    setIsSubmitting(true)
 
-      {loading ? (
-        <p>Loading herbs...</p>
-      ) : filteredHerbs.length === 0 ? (
-        <p>No herbs found.</p>
-      ) : (
-        <div className="grid gap-6">
-          {filteredHerbs.map((herb) => (
-            <Card key={herb.id} className="border-primary/20">
-              <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                  <span>{herb.herb_name}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {new Date(herb.created_at).toLocaleString()}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <p><b>Farmer ID:</b> {herb.farmer_id}</p>
-                <p><b>Location:</b> {herb.geo_tag.location}</p>
-                <p><b>Harvest Date:</b> {herb.harvest_date || "Not provided"}</p>
-                <p><b>Description:</b> {herb.description || "—"}</p>
-                <p><b>Status:</b> {herb.status}</p>
+    // Simulate API call delay
+    await new Promise((resolve) => setTimeout(resolve, 1000))
 
-                <div className="flex gap-3 mt-4">
-                  <Button
-                    className="flex items-center gap-2"
-                    onClick={() => updateStatus(herb.id, "Verified")}
-                    disabled={herb.status === "Verified"}
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                    Approve
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="flex items-center gap-2"
-                    onClick={() => updateStatus(herb.id, "Rejected")}
-                    disabled={herb.status === "Rejected"}
-                  >
-                    <XCircle className="h-4 w-4" />
-                    Reject
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+    const updatedEntry: HerbEntry = {
+      ...entry,
+      status: verificationForm.status,
+      labNotes: verificationForm.labNotes,
+      labId: verificationForm.labId,
+      verificationDate: new Date().toISOString(),
+    }
 
-  // Home View Component
-  const HomeView = () => (
+    // Update localStorage
+    const allEntries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
+    const updatedEntries = allEntries.map((e: HerbEntry) => (e.id === entry.id ? updatedEntry : e))
+    localStorage.setItem("herbEntries", JSON.stringify(updatedEntries))
+
+    // Update state
+    setHerbEntries(updatedEntries)
+    setSelectedEntry(null)
+    setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+    setIsSubmitting(false)
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending":
+        return (
+          <Badge variant="outline" className="text-yellow-600 border-yellow-600">
+            <Clock className="h-3 w-3" />
+            Pending
+          </Badge>
+        )
+      case "verified":
+        return (
+          <Badge variant="default" className="bg-green-600">
+            <CheckCircle className="h-3 w-3" />
+            Verified
+          </Badge>
+        )
+      case "rejected":
+        return (
+          <Badge variant="destructive">
+            <XCircle className="h-3 w-3" />
+            Rejected
+          </Badge>
+        )
+      default:
+        return <Badge variant="outline">Unknown</Badge>
+    }
+  }
+
+  return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* Header */}
       <header className="border-b bg-card/50 backdrop-blur-sm">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/"
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+              Back to Home
+            </Link>
             <div className="flex items-center gap-2">
-              <Leaf className="h-8 w-8 text-primary" />
-              <h1 className="text-2xl font-bold text-foreground">AyurTrace</h1>
+              <FlaskConical className="h-6 w-6 text-secondary" />
+              <h1 className="text-xl font-semibold">AyurTrace - Lab Verification Portal</h1>
             </div>
-            <nav className="hidden md:flex items-center gap-6">
-              <Link href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
-                Features
-              </Link>
-              <Link href="#how-it-works" className="text-muted-foreground hover:text-foreground transition-colors">
-                How It Works
-              </Link>
-            </nav>
           </div>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="py-20 px-4">
-        <div className="container mx-auto text-center">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-5xl font-bold text-foreground mb-6 text-balance">
-              Blockchain Traceability for Ayurvedic Herbs
-            </h2>
-            <p className="text-xl text-muted-foreground mb-8 text-pretty">
-              Trust, Transparency & Traceability for Ayurveda. Track your herbs from farm to consumer with blockchain
-              technology.
-            </p>
-
-            {/* Action Cards */}
-            <div className="grid md:grid-cols-3 gap-6 mt-12">
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer group">
-                <CardHeader className="text-center">
-                  <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                    <Users className="h-8 w-8 text-primary" />
-                  </div>
-                  <CardTitle className="text-xl">For Farmers</CardTitle>
-                  <CardDescription>Register your herbs and get blockchain verification</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Link href="/farmer">
-                    <Button className="w-full" size="lg">
-                      Enter Herb Data
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer group">
-                <CardHeader className="text-center">
-                  <div className="mx-auto w-16 h-16 bg-secondary/10 rounded-full flex items-center justify-center mb-4 group-hover:bg-secondary/20 transition-colors">
-                    <FlaskConical className="h-8 w-8 text-secondary" />
-                  </div>
-                  <CardTitle className="text-xl">For Labs</CardTitle>
-                  <CardDescription>Verify and authenticate herb quality and origin</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button 
-                    variant="secondary" 
-                    className="w-full" 
-                    size="lg"
-                    onClick={() => setActiveView('lab')}
-                  >
-                    Verify Herbs
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <Card className="hover:shadow-lg transition-shadow cursor-pointer group">
-                <CardHeader className="text-center">
-                  <div className="mx-auto w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mb-4 group-hover:bg-accent/20 transition-colors">
-                    <QrCode className="h-8 w-8 text-accent" />
-                  </div>
-                  <CardTitle className="text-xl">For Consumers</CardTitle>
-                  <CardDescription>Track your herbs' complete journey and authenticity</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Link href="/consumer">
-                    <Button variant="outline" className="w-full bg-transparent" size="lg">
-                      Track Herbs
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="py-20 px-4 bg-card/30">
-        <div className="container mx-auto">
-          <div className="text-center mb-16">
-            <h3 className="text-3xl font-bold text-foreground mb-4">Why Choose AyurTrace?</h3>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Our blockchain-based system ensures complete transparency and trust in the Ayurvedic herb supply chain.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-6">
-                <Shield className="h-8 w-8 text-primary" />
-              </div>
-              <h4 className="text-xl font-semibold mb-4">Blockchain Security</h4>
-              <p className="text-muted-foreground">
-                Immutable records ensure data integrity and prevent tampering throughout the supply chain.
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="mx-auto w-16 h-16 bg-secondary/10 rounded-full flex items-center justify-center mb-6">
-                <MapPin className="h-8 w-8 text-secondary" />
-              </div>
-              <h4 className="text-xl font-semibold mb-4">Complete Traceability</h4>
-              <p className="text-muted-foreground">
-                Track herbs from farm location to final consumer with GPS coordinates and timestamps.
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="mx-auto w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mb-6">
-                <QrCode className="h-8 w-8 text-accent" />
-              </div>
-              <h4 className="text-xl font-semibold mb-4">QR Code Verification</h4>
-              <p className="text-muted-foreground">
-                Instant verification through QR codes linking to complete herb journey and lab results.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section id="how-it-works" className="py-20 px-4">
-        <div className="container mx-auto">
-          <div className="text-center mb-16">
-            <h3 className="text-3xl font-bold text-foreground mb-4">How It Works</h3>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Simple three-step process ensuring transparency from farm to consumer.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="mx-auto w-12 h-12 bg-primary text-primary-foreground rounded-full flex items-center justify-center mb-6 text-xl font-bold">
-                1
-              </div>
-              <h4 className="text-xl font-semibold mb-4">Farmer Registration</h4>
-              <p className="text-muted-foreground">
-                Farmers register herbs with location data and receive unique batch IDs with QR codes.
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="mx-auto w-12 h-12 bg-secondary text-secondary-foreground rounded-full flex items-center justify-center mb-6 text-xl font-bold">
-                2
-              </div>
-              <h4 className="text-xl font-semibold mb-4">Lab Verification</h4>
-              <p className="text-muted-foreground">
-                Certified labs verify herb quality and authenticity, updating blockchain records.
-              </p>
-            </div>
-
-            <div className="text-center">
-              <div className="mx-auto w-12 h-12 bg-accent text-accent-foreground rounded-full flex items-center justify-center mb-6 text-xl font-bold">
-                3
-              </div>
-              <h4 className="text-xl font-semibold mb-4">Consumer Tracking</h4>
-              <p className="text-muted-foreground">
-                Consumers scan QR codes to view complete herb journey and verification status.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t bg-card/50 py-8 px-4">
-        <div className="container mx-auto text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Leaf className="h-6 w-6 text-primary" />
-            <span className="text-lg font-semibold">AyurTrace</span>
-          </div>
-          <p className="text-muted-foreground mb-4">
-            Ensuring trust and transparency in Ayurvedic herb supply chains through blockchain technology.
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h2 className="text-3xl font-bold text-foreground mb-4">Herb Verification Dashboard</h2>
+          <p className="text-lg text-muted-foreground">
+            Review and verify Ayurvedic herb entries from farmers to ensure quality and authenticity.
           </p>
-          <div className="flex justify-center">
-            <Link href="/blockchain" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              View Blockchain Explorer
-            </Link>
-          </div>
         </div>
-      </footer>
+
+        {/* Search and Stats */}
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
+          <Card className="md:col-span-2">
+            <CardContent className="pt-6">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by herb name, batch ID, or farmer ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-yellow-600">{pendingEntries.length}</div>
+                <div className="text-sm text-muted-foreground">Pending Review</div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">{verifiedEntries.length}</div>
+                <div className="text-sm text-muted-foreground">Verified</div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Pending Entries Table */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-yellow-600" />
+              Pending Verification ({pendingEntries.length})
+            </CardTitle>
+            <CardDescription>Herb entries awaiting lab verification and quality assessment</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {pendingEntries.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No pending entries found. All herbs have been processed.
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Batch ID</TableHead>
+                    <TableHead>Herb Name</TableHead>
+                    <TableHead>Farmer ID</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Submitted</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pendingEntries.map((entry) => (
+                    <TableRow key={entry.id}>
+                      <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
+                      <TableCell className="font-medium">{entry.herbName}</TableCell>
+                      <TableCell>{entry.farmerId}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{entry.location}</TableCell>
+                      <TableCell>{new Date(entry.timestamp).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button size="sm" onClick={() => setSelectedEntry(entry)} className="mr-2">
+                              <Eye className="h-4 w-4 mr-1" />
+                              Verify
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                              <DialogTitle>Verify Herb Entry</DialogTitle>
+                              <DialogDescription>
+                                Review the herb details and provide your verification decision
+                              </DialogDescription>
+                            </DialogHeader>
+
+                            {selectedEntry && (
+                              <div className="space-y-6">
+                                {/* Herb Details */}
+                                <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Herb Name</Label>
+                                    <p className="font-medium">{selectedEntry.herbName}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Batch ID</Label>
+                                    <p className="font-mono text-sm">{selectedEntry.batchId}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Farmer ID</Label>
+                                    <p className="font-medium">{selectedEntry.farmerId}</p>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm text-muted-foreground">Submitted</Label>
+                                    <p>{new Date(selectedEntry.timestamp).toLocaleString()}</p>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <Label className="text-sm text-muted-foreground">Location</Label>
+                                    <p>{selectedEntry.location}</p>
+                                  </div>
+                                  {selectedEntry.description && (
+                                    <div className="col-span-2">
+                                      <Label className="text-sm text-muted-foreground">Additional Details</Label>
+                                      <p className="text-sm">{selectedEntry.description}</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Verification Form */}
+                                <div className="space-y-4">
+                                  <div className="space-y-2">
+                                    <Label htmlFor="labId">Lab ID *</Label>
+                                    <Input
+                                      id="labId"
+                                      placeholder="e.g., LAB001, Your Lab Registration"
+                                      value={verificationForm.labId}
+                                      onChange={(e) =>
+                                        setVerificationForm((prev) => ({
+                                          ...prev,
+                                          labId: e.target.value,
+                                        }))
+                                      }
+                                      required
+                                    />
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <Label htmlFor="status">Verification Status *</Label>
+                                    <Select
+                                      value={verificationForm.status}
+                                      onValueChange={(value: "verified" | "rejected") =>
+                                        setVerificationForm((prev) => ({ ...prev, status: value }))
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="verified">
+                                          <div className="flex items-center gap-2">
+                                            <CheckCircle className="h-4 w-4 text-green-600" />
+                                            Verified - Quality Approved
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="rejected">
+                                          <div className="flex items-center gap-2">
+                                            <XCircle className="h-4 w-4 text-red-600" />
+                                            Rejected - Quality Issues
+                                          </div>
+                                        </SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <Label htmlFor="labNotes">Lab Notes & Test Results *</Label>
+                                    <Textarea
+                                      id="labNotes"
+                                      placeholder="Enter detailed test results, quality assessment, purity levels, contamination checks, etc."
+                                      value={verificationForm.labNotes}
+                                      onChange={(e) =>
+                                        setVerificationForm((prev) => ({
+                                          ...prev,
+                                          labNotes: e.target.value,
+                                        }))
+                                      }
+                                      rows={4}
+                                      required
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            <DialogFooter>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedEntry(null)
+                                  setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                onClick={() => selectedEntry && handleVerification(selectedEntry)}
+                                disabled={isSubmitting || !verificationForm.labId || !verificationForm.labNotes}
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground mr-2" />
+                                    Submitting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <FlaskConical className="h-4 w-4 mr-2" />
+                                    Submit Verification
+                                  </>
+                                )}
+                              </Button>
+                            </DialogFooter>
+                          </DialogContent>
+                        </Dialog>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Verified Entries */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Verification History ({verifiedEntries.length + rejectedEntries.length})
+            </CardTitle>
+            <CardDescription>Previously processed herb entries with verification results</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {verifiedEntries.length + rejectedEntries.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">No verification history available yet.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Batch ID</TableHead>
+                    <TableHead>Herb Name</TableHead>
+                    <TableHead>Farmer ID</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Lab ID</TableHead>
+                    <TableHead>Verified Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...verifiedEntries, ...rejectedEntries]
+                    .sort(
+                      (a, b) =>
+                        new Date(b.verificationDate || 0).getTime() - new Date(a.verificationDate || 0).getTime(),
+                    )
+                    .map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
+                        <TableCell className="font-medium">{entry.herbName}</TableCell>
+                        <TableCell>{entry.farmerId}</TableCell>
+                        <TableCell>{getStatusBadge(entry.status)}</TableCell>
+                        <TableCell>{entry.labId}</TableCell>
+                        <TableCell>
+                          {entry.verificationDate ? new Date(entry.verificationDate).toLocaleDateString() : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
-
-  // Conditional rendering based on active view
-  return activeView === 'home' ? <HomeView /> : <LabView />
 }
