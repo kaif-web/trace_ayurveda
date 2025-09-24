@@ -94,11 +94,12 @@ export default function LabPage() {
   }, [])
 
   const filteredEntries = herbEntries.filter((entry) => {
-    const nameMatch = entry.herb_name?.toLowerCase().includes(searchTerm.toLowerCase())
-    const farmerMatch = entry.farmer_id?.toLowerCase().includes(searchTerm.toLowerCase())
-    const descMatch = entry.description?.toLowerCase().includes(searchTerm.toLowerCase())
-    return Boolean(nameMatch || farmerMatch || descMatch)
-  })
+  const nameMatch = entry.herb_name?.toLowerCase().includes(searchTerm.toLowerCase())
+  const farmerMatch = entry.farmer_id?.toString().toLowerCase().includes(searchTerm.toLowerCase())
+  const descMatch = entry.description?.toLowerCase().includes(searchTerm.toLowerCase())
+  return Boolean(nameMatch || farmerMatch || descMatch)
+})
+
 
   const normalizeStatus = (status: string) => status?.trim().toLowerCase()
   const pendingEntries = filteredEntries.filter((entry) => {
