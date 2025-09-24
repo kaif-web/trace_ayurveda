@@ -20,6 +20,17 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, FlaskConical, CheckCircle, XCircle, Clock, Search, Eye } from "lucide-react"
 import Link from "next/link"
+import { createClient } from "@supabase/supabase-js"
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error("Missing Supabase URL or anonymous key")
+}
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 interface HerbEntry {
   id: string
@@ -51,16 +62,23 @@ export default function LabPage() {
     labId: "",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  // Function to fetch data from Supabase
+  const fetchHerbEntries = async () => {
+    setIsLoading(true)
+    const { data, error } = await supabase.from("herb_entries").select("*")
+
+    if (error) {
+      console.error("Error fetching data:", error)
+    } else if (data) {
+      setHerbEntries(data as HerbEntry[])
+    }
+    setIsLoading(false)
+  }
 
   useEffect(() => {
-    // Load herb entries from localStorage
-    const entries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
-    setHerbEntries(
-      entries.map((entry: any) => ({
-        ...entry,
-        status: entry.status || "pending",
-      })),
-    )
+    fetchHerbEntries()
   }, [])
 
   const filteredEntries = herbEntries.filter(
@@ -77,24 +95,22 @@ export default function LabPage() {
   const handleVerification = async (entry: HerbEntry) => {
     setIsSubmitting(true)
 
-    // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    const updatedEntry: HerbEntry = {
-      ...entry,
+    const updatedEntry: Partial<HerbEntry> = {
       status: verificationForm.status,
       labNotes: verificationForm.labNotes,
       labId: verificationForm.labId,
       verificationDate: new Date().toISOString(),
     }
 
-    // Update localStorage
-    const allEntries = JSON.parse(localStorage.getItem("herbEntries") || "[]")
-    const updatedEntries = allEntries.map((e: HerbEntry) => (e.id === entry.id ? updatedEntry : e))
-    localStorage.setItem("herbEntries", JSON.stringify(updatedEntries))
+    const { error } = await supabase.from("herb_entries").update(updatedEntry).eq("id", entry.id)
 
-    // Update state
-    setHerbEntries(updatedEntries)
+    if (error) {
+      console.error("Error updating entry:", error)
+    } else {
+      // Re-fetch all entries to ensure state is in sync with the database
+      await fetchHerbEntries()
+    }
+
     setSelectedEntry(null)
     setVerificationForm({ status: "verified", labNotes: "", labId: "" })
     setIsSubmitting(false)
@@ -191,239 +207,250 @@ export default function LabPage() {
           </Card>
         </div>
 
-        {/* Pending Entries Table */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-yellow-600" />
-              Pending Verification ({pendingEntries.length})
-            </CardTitle>
-            <CardDescription>Herb entries awaiting lab verification and quality assessment</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {pendingEntries.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No pending entries found. All herbs have been processed.
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Batch ID</TableHead>
-                    <TableHead>Herb Name</TableHead>
-                    <TableHead>Farmer ID</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Submitted</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pendingEntries.map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
-                      <TableCell className="font-medium">{entry.herbName}</TableCell>
-                      <TableCell>{entry.farmerId}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{entry.location}</TableCell>
-                      <TableCell>{new Date(entry.timestamp).toLocaleDateString()}</TableCell>
-                      <TableCell>
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button size="sm" onClick={() => setSelectedEntry(entry)} className="mr-2">
-                              <Eye className="h-4 w-4 mr-1" />
-                              Verify
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-2xl">
-                            <DialogHeader>
-                              <DialogTitle>Verify Herb Entry</DialogTitle>
-                              <DialogDescription>
-                                Review the herb details and provide your verification decision
-                              </DialogDescription>
-                            </DialogHeader>
-
-                            {selectedEntry && (
-                              <div className="space-y-6">
-                                {/* Herb Details */}
-                                <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
-                                  <div>
-                                    <Label className="text-sm text-muted-foreground">Herb Name</Label>
-                                    <p className="font-medium">{selectedEntry.herbName}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm text-muted-foreground">Batch ID</Label>
-                                    <p className="font-mono text-sm">{selectedEntry.batchId}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm text-muted-foreground">Farmer ID</Label>
-                                    <p className="font-medium">{selectedEntry.farmerId}</p>
-                                  </div>
-                                  <div>
-                                    <Label className="text-sm text-muted-foreground">Submitted</Label>
-                                    <p>{new Date(selectedEntry.timestamp).toLocaleString()}</p>
-                                  </div>
-                                  <div className="col-span-2">
-                                    <Label className="text-sm text-muted-foreground">Location</Label>
-                                    <p>{selectedEntry.location}</p>
-                                  </div>
-                                  {selectedEntry.description && (
-                                    <div className="col-span-2">
-                                      <Label className="text-sm text-muted-foreground">Additional Details</Label>
-                                      <p className="text-sm">{selectedEntry.description}</p>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Verification Form */}
-                                <div className="space-y-4">
-                                  <div className="space-y-2">
-                                    <Label htmlFor="labId">Lab ID *</Label>
-                                    <Input
-                                      id="labId"
-                                      placeholder="e.g., LAB001, Your Lab Registration"
-                                      value={verificationForm.labId}
-                                      onChange={(e) =>
-                                        setVerificationForm((prev) => ({
-                                          ...prev,
-                                          labId: e.target.value,
-                                        }))
-                                      }
-                                      required
-                                    />
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    <Label htmlFor="status">Verification Status *</Label>
-                                    <Select
-                                      value={verificationForm.status}
-                                      onValueChange={(value: "verified" | "rejected") =>
-                                        setVerificationForm((prev) => ({ ...prev, status: value }))
-                                      }
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="verified">
-                                          <div className="flex items-center gap-2">
-                                            <CheckCircle className="h-4 w-4 text-green-600" />
-                                            Verified - Quality Approved
-                                          </div>
-                                        </SelectItem>
-                                        <SelectItem value="rejected">
-                                          <div className="flex items-center gap-2">
-                                            <XCircle className="h-4 w-4 text-red-600" />
-                                            Rejected - Quality Issues
-                                          </div>
-                                        </SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    <Label htmlFor="labNotes">Lab Notes & Test Results *</Label>
-                                    <Textarea
-                                      id="labNotes"
-                                      placeholder="Enter detailed test results, quality assessment, purity levels, contamination checks, etc."
-                                      value={verificationForm.labNotes}
-                                      onChange={(e) =>
-                                        setVerificationForm((prev) => ({
-                                          ...prev,
-                                          labNotes: e.target.value,
-                                        }))
-                                      }
-                                      rows={4}
-                                      required
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            <DialogFooter>
-                              <Button
-                                variant="outline"
-                                onClick={() => {
-                                  setSelectedEntry(null)
-                                  setVerificationForm({ status: "verified", labNotes: "", labId: "" })
-                                }}
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                onClick={() => selectedEntry && handleVerification(selectedEntry)}
-                                disabled={isSubmitting || !verificationForm.labId || !verificationForm.labNotes}
-                              >
-                                {isSubmitting ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground mr-2" />
-                                    Submitting...
-                                  </>
-                                ) : (
-                                  <>
-                                    <FlaskConical className="h-4 w-4 mr-2" />
-                                    Submit Verification
-                                  </>
-                                )}
-                              </Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Verified Entries */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              Verification History ({verifiedEntries.length + rejectedEntries.length})
-            </CardTitle>
-            <CardDescription>Previously processed herb entries with verification results</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {verifiedEntries.length + rejectedEntries.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">No verification history available yet.</div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Batch ID</TableHead>
-                    <TableHead>Herb Name</TableHead>
-                    <TableHead>Farmer ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Lab ID</TableHead>
-                    <TableHead>Verified Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {[...verifiedEntries, ...rejectedEntries]
-                    .sort(
-                      (a, b) =>
-                        new Date(b.verificationDate || 0).getTime() - new Date(a.verificationDate || 0).getTime(),
-                    )
-                    .map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
-                        <TableCell className="font-medium">{entry.herbName}</TableCell>
-                        <TableCell>{entry.farmerId}</TableCell>
-                        <TableCell>{getStatusBadge(entry.status)}</TableCell>
-                        <TableCell>{entry.labId}</TableCell>
-                        <TableCell>
-                          {entry.verificationDate ? new Date(entry.verificationDate).toLocaleDateString() : "-"}
-                        </TableCell>
+        {isLoading ? (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading entries from Supabase...</p>
+          </div>
+        ) : (
+          <>
+            {/* Pending Entries Table */}
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-yellow-600" />
+                  Pending Verification ({pendingEntries.length})
+                </CardTitle>
+                <CardDescription>Herb entries awaiting lab verification and quality assessment</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {pendingEntries.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No pending entries found. All herbs have been processed.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Batch ID</TableHead>
+                        <TableHead>Herb Name</TableHead>
+                        <TableHead>Farmer ID</TableHead>
+                        <TableHead>Location</TableHead>
+                        <TableHead>Submitted</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {pendingEntries.map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
+                          <TableCell className="font-medium">{entry.herbName}</TableCell>
+                          <TableCell>{entry.farmerId}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{entry.location}</TableCell>
+                          <TableCell>{new Date(entry.timestamp).toLocaleDateString()}</TableCell>
+                          <TableCell>
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <Button size="sm" onClick={() => setSelectedEntry(entry)} className="mr-2">
+                                  <Eye className="h-4 w-4 mr-1" />
+                                  Verify
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent className="max-w-2xl">
+                                <DialogHeader>
+                                  <DialogTitle>Verify Herb Entry</DialogTitle>
+                                  <DialogDescription>
+                                    Review the herb details and provide your verification decision
+                                  </DialogDescription>
+                                </DialogHeader>
+
+                                {selectedEntry && (
+                                  <div className="space-y-6">
+                                    {/* Herb Details */}
+                                    <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
+                                      <div>
+                                        <Label className="text-sm text-muted-foreground">Herb Name</Label>
+                                        <p className="font-medium">{selectedEntry.herbName}</p>
+                                      </div>
+                                      <div>
+                                        <Label className="text-sm text-muted-foreground">Batch ID</Label>
+                                        <p className="font-mono text-sm">{selectedEntry.batchId}</p>
+                                      </div>
+                                      <div>
+                                        <Label className="text-sm text-muted-foreground">Farmer ID</Label>
+                                        <p className="font-medium">{selectedEntry.farmerId}</p>
+                                      </div>
+                                      <div>
+                                        <Label className="text-sm text-muted-foreground">Submitted</Label>
+                                        <p>{new Date(selectedEntry.timestamp).toLocaleString()}</p>
+                                      </div>
+                                      <div className="col-span-2">
+                                        <Label className="text-sm text-muted-foreground">Location</Label>
+                                        <p>{selectedEntry.location}</p>
+                                      </div>
+                                      {selectedEntry.description && (
+                                        <div className="col-span-2">
+                                          <Label className="text-sm text-muted-foreground">
+                                            Additional Details
+                                          </Label>
+                                          <p className="text-sm">{selectedEntry.description}</p>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Verification Form */}
+                                    <div className="space-y-4">
+                                      <div className="space-y-2">
+                                        <Label htmlFor="labId">Lab ID *</Label>
+                                        <Input
+                                          id="labId"
+                                          placeholder="e.g., LAB001, Your Lab Registration"
+                                          value={verificationForm.labId}
+                                          onChange={(e) =>
+                                            setVerificationForm((prev) => ({
+                                              ...prev,
+                                              labId: e.target.value,
+                                            }))
+                                          }
+                                          required
+                                        />
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <Label htmlFor="status">Verification Status *</Label>
+                                        <Select
+                                          value={verificationForm.status}
+                                          onValueChange={(value: "verified" | "rejected") =>
+                                            setVerificationForm((prev) => ({ ...prev, status: value }))
+                                          }
+                                        >
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            <SelectItem value="verified">
+                                              <div className="flex items-center gap-2">
+                                                <CheckCircle className="h-4 w-4 text-green-600" />
+                                                Verified - Quality Approved
+                                              </div>
+                                            </SelectItem>
+                                            <SelectItem value="rejected">
+                                              <div className="flex items-center gap-2">
+                                                <XCircle className="h-4 w-4 text-red-600" />
+                                                Rejected - Quality Issues
+                                              </div>
+                                            </SelectItem>
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <Label htmlFor="labNotes">Lab Notes & Test Results *</Label>
+                                        <Textarea
+                                          id="labNotes"
+                                          placeholder="Enter detailed test results, quality assessment, purity levels, contamination checks, etc."
+                                          value={verificationForm.labNotes}
+                                          onChange={(e) =>
+                                            setVerificationForm((prev) => ({
+                                              ...prev,
+                                              labNotes: e.target.value,
+                                            }))
+                                          }
+                                          rows={4}
+                                          required
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                <DialogFooter>
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedEntry(null)
+                                      setVerificationForm({ status: "verified", labNotes: "", labId: "" })
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    onClick={() => selectedEntry && handleVerification(selectedEntry)}
+                                    disabled={isSubmitting || !verificationForm.labId || !verificationForm.labNotes}
+                                  >
+                                    {isSubmitting ? (
+                                      <>
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground mr-2" />
+                                        Submitting...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <FlaskConical className="h-4 w-4 mr-2" />
+                                        Submit Verification
+                                      </>
+                                    )}
+                                  </Button>
+                                </DialogFooter>
+                              </DialogContent>
+                            </Dialog>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Verified Entries */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  Verification History ({verifiedEntries.length + rejectedEntries.length})
+                </CardTitle>
+                <CardDescription>Previously processed herb entries with verification results</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {verifiedEntries.length + rejectedEntries.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">No verification history available yet.</div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Batch ID</TableHead>
+                        <TableHead>Herb Name</TableHead>
+                        <TableHead>Farmer ID</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Lab ID</TableHead>
+                        <TableHead>Verified Date</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[...verifiedEntries, ...rejectedEntries]
+                        .sort(
+                          (a, b) =>
+                            new Date(b.verificationDate || 0).getTime() - new Date(a.verificationDate || 0).getTime(),
+                        )
+                        .map((entry) => (
+                          <TableRow key={entry.id}>
+                            <TableCell className="font-mono text-sm">{entry.batchId}</TableCell>
+                            <TableCell className="font-medium">{entry.herbName}</TableCell>
+                            <TableCell>{entry.farmerId}</TableCell>
+                            <TableCell>{getStatusBadge(entry.status)}</TableCell>
+                            <TableCell>{entry.labId}</TableCell>
+                            <TableCell>
+                              {entry.verificationDate ? new Date(entry.verificationDate).toLocaleDateString() : "-"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     </div>
   )
